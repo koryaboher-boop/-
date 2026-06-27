@@ -173,6 +173,30 @@
     </div>
   </header>
 
+  <!-- Sub-Header Bar (Breadcrumbs & Navigation Control) -->
+  <div id="sub-header-bar" class="sticky top-16 z-40 w-full border-b border-slate-200/80 bg-white/95 dark:border-slate-800/80 dark:bg-slate-950/95 shadow-sm backdrop-blur-md transition-colors duration-300">
+    <div class="container mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
+      <!-- Breadcrumbs -->
+      <nav id="breadcrumbs" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 font-display overflow-x-auto whitespace-nowrap scrollbar-none" dir="rtl">
+        <!-- Rendered dynamically -->
+      </nav>
+      
+      <!-- Back & Home Buttons -->
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Home Button -->
+        <button onclick="navigate('home')" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 text-[10px] sm:text-xs font-bold transition-all shadow-sm">
+          <i data-lucide="home" class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"></i>
+          <span class="hidden sm:inline">الرئيسية</span>
+        </button>
+        <!-- Back Button -->
+        <button id="global-back-btn" onclick="goBack()" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 text-[10px] sm:text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+          <span class="hidden sm:inline">رجوع</span>
+          <i data-lucide="arrow-left" class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Main Content Areas -->
   <main class="flex-1 flex flex-col justify-start">
 
@@ -1021,6 +1045,9 @@
     let isFcFlipped = false;
     let toolsActiveSubPage = 'flashcards';
 
+    // Navigation Stack State
+    let navigationHistory = [{ page: 'home' }];
+
     // Student persistent progress state
     let completedLessons = {}; // { lessonId: boolean }
     let quizScores = {}; // { lessonId: number }
@@ -1048,10 +1075,13 @@
     // Lifecycle & State persistence
     // ==========================================
     window.addEventListener('DOMContentLoaded', () => {
+      // Sort lessons logically first
+      sortLessonsLogically();
+
       // Initialize Lucide icons
       lucide.createIcons();
       
-      // Load saved state
+      // Load saved progress state
       loadState();
       
       // Seed activity log if empty
@@ -1062,8 +1092,9 @@
       // Initialize theme toggler
       initTheme();
 
-      // Navigate to Home initially
-      navigate('home');
+      // Load and apply navigation history state
+      loadHistory();
+      applyNavigationState(navigationHistory[navigationHistory.length - 1]);
     });
 
     function saveState() {
@@ -1139,10 +1170,92 @@
     }
 
     // ==========================================
-    // Dynamic Page Router
+    // Dynamic Page Router & History Stack
     // ==========================================
     function navigate(pageId) {
-      // Clear any running audio syncs
+      pushNavigationState({ page: pageId });
+    }
+
+    function goBack() {
+      popNavigationState();
+    }
+
+    function pushNavigationState(state) {
+      const top = navigationHistory[navigationHistory.length - 1];
+      
+      // Check if the state is identical to the top state of the stack
+      let isIdentical = top && top.page === state.page;
+      if (isIdentical && top) {
+        for (let key in state) {
+          if (top[key] !== state[key]) {
+            isIdentical = false;
+            break;
+          }
+        }
+        for (let key in top) {
+          if (top[key] !== state[key]) {
+            isIdentical = false;
+            break;
+          }
+        }
+      }
+      
+      if (!isIdentical) {
+        navigationHistory.push(state);
+        saveHistory();
+      }
+      applyNavigationState(state);
+    }
+
+    function popNavigationState() {
+      if (navigationHistory.length > 1) {
+        navigationHistory.pop();
+        saveHistory();
+        applyNavigationState(navigationHistory[navigationHistory.length - 1]);
+      }
+    }
+
+    function saveHistory() {
+      localStorage.setItem('imam_malik_academy_history', JSON.stringify(navigationHistory));
+    }
+
+    function loadHistory() {
+      const saved = localStorage.getItem('imam_malik_academy_history');
+      if (saved) {
+        try {
+          navigationHistory = JSON.parse(saved);
+          if (!Array.isArray(navigationHistory) || navigationHistory.length === 0) {
+            navigationHistory = [{ page: 'home' }];
+          }
+        } catch (e) {
+          navigationHistory = [{ page: 'home' }];
+        }
+      } else {
+        navigationHistory = [{ page: 'home' }];
+      }
+    }
+
+    function clickBreadcrumb(pageId, params = {}) {
+      // Find matching state in stack to truncate
+      const idx = navigationHistory.findIndex(s => {
+        if (s.page !== pageId) return false;
+        for (let key in params) {
+          if (s[key] !== params[key]) return false;
+        }
+        return true;
+      });
+
+      if (idx !== -1) {
+        navigationHistory = navigationHistory.slice(0, idx + 1);
+        saveHistory();
+        applyNavigationState(navigationHistory[navigationHistory.length - 1]);
+      } else {
+        pushNavigationState({ page: pageId, ...params });
+      }
+    }
+
+    function applyNavigationState(state) {
+      // Clear running audio syncs
       stopAudioPlayer();
 
       // Hide all page sections
@@ -1150,6 +1263,15 @@
         section.classList.add('hidden');
       });
       
+      // Determine pageId from sub-view states
+      let pageId = state.page;
+      if (pageId === 'track' || pageId === 'unit') {
+        pageId = 'tracks';
+      }
+      if (pageId === 'lesson' || pageId === 'topic') {
+        pageId = 'lessons';
+      }
+
       // Show targeted page
       const targetSec = document.getElementById('page-' + pageId);
       if (targetSec) {
@@ -1170,15 +1292,51 @@
 
       activePage = pageId;
 
-      // Initialize sections
-      if (pageId === 'home') loadHome();
-      else if (pageId === 'tracks') loadTracks();
-      else if (pageId === 'lessons') loadLessons();
-      else if (pageId === 'library') loadLibrary();
-      else if (pageId === 'fatwas') loadFatwas();
-      else if (pageId === 'tools') loadTools();
-      else if (pageId === 'search') loadSearchPage();
-      else if (pageId === 'dashboard') loadDashboard();
+      // Initialize/Load section content
+      if (state.page === 'home') {
+        loadHome();
+      } else if (state.page === 'tracks') {
+        loadTracks();
+      } else if (state.page === 'track') {
+        loadTracks();
+        switchTrack(state.trackId, false);
+      } else if (state.page === 'unit') {
+        loadTracks();
+        switchTrack(state.trackId, false);
+        expandUnitAccordion(state.unitId);
+      } else if (state.page === 'lessons') {
+        loadLessons();
+      } else if (state.page === 'lesson') {
+        loadLessons();
+        playLesson(state.lessonId, false);
+      } else if (state.page === 'topic') {
+        loadLessons();
+        playLesson(state.lessonId, false);
+        switchExplanationTab(state.topicId, false);
+      } else if (state.page === 'library') {
+        loadLibrary();
+      } else if (state.page === 'fatwas') {
+        loadFatwas();
+      } else if (state.page === 'tools') {
+        loadTools();
+      } else if (state.page === 'search') {
+        loadSearchPage();
+      } else if (state.page === 'dashboard') {
+        loadDashboard();
+      }
+
+      // Update back button
+      const backBtn = document.getElementById('global-back-btn');
+      if (backBtn) {
+        if (navigationHistory.length > 1) {
+          backBtn.removeAttribute('disabled');
+        } else {
+          backBtn.setAttribute('disabled', 'true');
+        }
+      }
+
+      // Update Breadcrumbs UI
+      updateBreadcrumbsUI(state);
 
       // Scroll to top of viewport
       window.scrollTo(0, 0);
@@ -1186,6 +1344,169 @@
       // Reload Mobile Menu & Icons
       document.getElementById('mobile-menu').classList.add('hidden');
       lucide.createIcons();
+    }
+
+    function updateBreadcrumbsUI(state) {
+      const breadcrumbsNav = document.getElementById('breadcrumbs');
+      if (!breadcrumbsNav) return;
+
+      const segments = [];
+
+      // Always start with home
+      segments.push({
+        label: 'الرئيسية',
+        page: 'home',
+        params: {}
+      });
+
+      if (state.page === 'tracks') {
+        segments.push({ label: 'المسارات الدراسية', page: 'tracks', params: {} });
+      } else if (state.page === 'track') {
+        segments.push({ label: 'المسارات الدراسية', page: 'tracks', params: {} });
+        const track = window.tracks.find(t => t.id === state.trackId);
+        if (track) {
+          segments.push({ label: track.title, page: 'track', params: { trackId: state.trackId } });
+        }
+      } else if (state.page === 'unit') {
+        segments.push({ label: 'المسارات الدراسية', page: 'tracks', params: {} });
+        const track = window.tracks.find(t => t.id === state.trackId);
+        if (track) {
+          segments.push({ label: track.title, page: 'track', params: { trackId: state.trackId } });
+          const unitObj = track.curriculum[state.unitId - 1];
+          if (unitObj) {
+            const unitLabel = unitObj.module.split(':')[0] || 'الوحدة';
+            segments.push({ label: unitLabel, page: 'unit', params: { trackId: state.trackId, unitId: state.unitId } });
+          }
+        }
+      } else if (state.page === 'lessons') {
+        segments.push({ label: 'الدروس المنهجية', page: 'lessons', params: {} });
+      } else if (state.page === 'lesson' || state.page === 'topic') {
+        const lesson = window.lessons.find(l => l.id === state.lessonId);
+        if (lesson) {
+          segments.push({ label: 'الدروس المنهجية', page: 'lessons', params: {} });
+          
+          const track = window.tracks.find(t => t.id === lesson.trackId);
+          if (track) {
+            segments.push({ label: track.title, page: 'track', params: { trackId: lesson.trackId } });
+            const unitLabel = lesson.unitTitle.split(':')[0] || 'الوحدة';
+            segments.push({ label: unitLabel, page: 'unit', params: { trackId: lesson.trackId, unitId: lesson.unit } });
+          }
+          
+          segments.push({ label: lesson.title, page: 'lesson', params: { lessonId: lesson.id } });
+          
+          if (state.page === 'topic') {
+            const tabsLabels = {
+              'simplified': 'التفسير الميسر',
+              'detailed': 'الشرح الأكاديمي',
+              'mindmap': 'خريطة المفاهيم',
+              'summary': 'جدول التلخيص',
+              'quiz': 'التقييم'
+            };
+            segments.push({ label: tabsLabels[state.topicId] || state.topicId, page: 'topic', params: { lessonId: lesson.id, topicId: state.topicId } });
+          }
+        }
+      } else if (state.page === 'library') {
+        segments.push({ label: 'المكتبة الكبرى', page: 'library', params: {} });
+      } else if (state.page === 'fatwas') {
+        segments.push({ label: 'الفتاوى المؤصلة', page: 'fatwas', params: {} });
+      } else if (state.page === 'tools') {
+        segments.push({ label: 'الأدوات التفاعلية', page: 'tools', params: {} });
+      } else if (state.page === 'search') {
+        segments.push({ label: 'البحث الموحد', page: 'search', params: {} });
+      } else if (state.page === 'dashboard') {
+        segments.push({ label: 'لوحة الطالب', page: 'dashboard', params: {} });
+      }
+
+      // Convert segments to HTML
+      breadcrumbsNav.innerHTML = segments.map((seg, idx) => {
+        const isLast = idx === segments.length - 1;
+        const paramsStr = JSON.stringify(seg.params);
+        if (isLast) {
+          return `<span class="text-emerald-700 dark:text-emerald-400 font-extrabold">${seg.label}</span>`;
+        } else {
+          return `
+            <a href="#" onclick="clickBreadcrumb('${seg.page}', ${paramsStr.replace(/"/g, "'")}); return false;" class="text-slate-500 hover:text-emerald-755 dark:text-slate-400 dark:hover:text-emerald-450 transition-colors">
+              ${seg.label}
+            </a>
+            <i data-lucide="chevron-left" class="h-3 w-3 text-slate-400 mx-0.5 shrink-0"></i>
+          `;
+        }
+      }).join('');
+      lucide.createIcons();
+    }
+
+    // ==========================================
+    // Lesson Ordering, Locking & Numbering Helpers
+    // ==========================================
+    function sortLessonsLogically() {
+      if (!window.lessons) return;
+      
+      const orderMap = {
+        'lesson-taarif-fiqh': 1,
+        'lesson-nashat-maliki': 2,
+        'lesson-usul-maliki': 3,
+        'lesson-imam-malik': 4,
+        'lesson-akhdari-intro': 5,
+        'lesson-1': 6,
+        'lesson-2': 7,
+        'lesson-3': 8,
+        'lesson-4': 9,
+        'lesson-5': 10,
+        'lesson-6': 11,
+        'lesson-7': 12,
+        'lesson-8': 13,
+        'lesson-9': 14,
+        'lesson-9b': 15,
+        'lesson-9c': 16,
+        'lesson-10': 17
+      };
+      
+      window.lessons.sort((a, b) => {
+        const orderA = orderMap[a.id] || 999;
+        const orderB = orderMap[b.id] || 999;
+        return orderA - orderB;
+      });
+    }
+
+    function isLessonLocked(lessonId) {
+      if (!window.lessons) return false;
+      const lesson = window.lessons.find(l => l.id === lessonId);
+      if (!lesson) return false;
+      
+      const trackLessons = window.lessons.filter(l => l.trackId === lesson.trackId);
+      const idx = trackLessons.findIndex(l => l.id === lessonId);
+      
+      // Locked if any preceding lesson is not completed
+      for (let i = 0; i < idx; i++) {
+        if (!completedLessons[trackLessons[i].id]) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function getLessonProgressInfo(lessonId) {
+      if (!window.lessons) return { index: 0, total: 0 };
+      const lesson = window.lessons.find(l => l.id === lessonId);
+      if (!lesson) return { index: 0, total: 0 };
+      
+      const trackLessons = window.lessons.filter(l => l.trackId === lesson.trackId);
+      const index = trackLessons.findIndex(l => l.id === lessonId) + 1;
+      return {
+        index: index,
+        total: trackLessons.length
+      };
+    }
+
+    function expandUnitAccordion(unitId) {
+      const el = document.getElementById('unit-card-' + unitId);
+      if (el) {
+        el.classList.add('border-emerald-500', 'ring-2', 'ring-emerald-500/20');
+        setTimeout(() => {
+          el.classList.remove('border-emerald-500', 'ring-2', 'ring-emerald-500/20');
+        }, 2000);
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
 
     // ==========================================
@@ -1240,17 +1561,22 @@
         switchBioTab('story');
       }
 
-      // 3. Render Recent Lessons
+      // 3. Render Recent Lessons (filtering out locked ones)
       const recentContainer = document.getElementById('recent-lessons-container');
       if (recentContainer && window.recentLessons) {
-        recentContainer.innerHTML = window.recentLessons.map(lesson => {
-          // Find matching actual lesson ID
+        // Find matching actual lesson IDs for each recent item and filter out locked ones
+        const recentLessonsWithIds = window.recentLessons.map(lesson => {
           let actualLessonId = 'lesson-akhdari-intro';
           if (lesson.id === 'r1') actualLessonId = 'lesson-1';
           if (lesson.id === 'r2') actualLessonId = 'lesson-taarif-fiqh';
           if (lesson.id === 'r3') actualLessonId = 'lesson-imam-malik';
           if (lesson.id === 'r4') actualLessonId = 'lesson-usul-maliki';
+          return { ...lesson, actualLessonId };
+        });
 
+        const visibleRecent = recentLessonsWithIds.filter(l => !isLessonLocked(l.actualLessonId));
+
+        recentContainer.innerHTML = visibleRecent.map(lesson => {
           return `
             <div class="group relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/40 transition-all hover:-translate-y-0.5 flex flex-col justify-between">
               <div>
@@ -1264,7 +1590,7 @@
               
               <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
                 <span class="text-[9px] text-slate-400 font-semibold">${lesson.duration}</span>
-                <button onclick="playLessonDirectly('${actualLessonId}')" class="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-0.5">
+                <button onclick="playLesson('${lesson.actualLessonId}')" class="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-0.5">
                   ابدأ الدرس
                   <i data-lucide="chevron-left" class="h-3 w-3"></i>
                 </button>
@@ -1309,8 +1635,8 @@
             </div>
             <div>
               <h5 class="font-bold text-slate-900 dark:text-white border-b pb-2 mb-3 text-xs flex items-center gap-1.5">
-                <i data-lucide="graduation-cap" class="h-4 w-4 text-amber-500"></i>
-                أشهر تلاميذه
+                <i data-lucide="graduation-cap" class="h-4 w-4 text-amber-600"></i>
+                أشهر تلاميذه ورواد مذهبه
               </h5>
               <ul class="space-y-2 text-xs text-slate-655 dark:text-slate-400">
                 ${studentsHtml}
@@ -1322,25 +1648,26 @@
       lucide.createIcons();
     }
 
-    function playLessonDirectly(lessonId) {
-      navigate('lessons');
-      playLesson(lessonId);
-    }
-
     // ==========================================
     // PAGE 2: LEARNING TRACKS DYNAMIC LOGIC
     // ==========================================
     function loadTracks() {
-      switchTrack(currentTrackId);
+      switchTrack(currentTrackId, false);
     }
 
-    function switchTrack(trackId) {
-      currentTrackId = trackId;
-      
+    function switchTrack(trackId, pushHistory = true) {
+      if (pushHistory) {
+        pushNavigationState({ page: 'track', trackId: trackId });
+        return;
+      }
+
+      activeTrackId = trackId;
+
+      // Update active tab styling
       document.querySelectorAll('.track-tab-btn').forEach(btn => {
-        btn.className = "track-tab-btn px-6 py-2.5 text-xs font-bold rounded-lg text-slate-655 dark:text-slate-400 hover:text-emerald-600 transition-all";
+        btn.className = "track-tab-btn px-6 py-2.5 text-xs font-bold rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-all";
       });
-      const activeBtn = document.getElementById('btn-track-' + trackId);
+      const activeBtn = document.getElementById('track-tab-btn-' + trackId);
       if (activeBtn) {
         activeBtn.className = "track-tab-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-emerald-700 text-white transition-all shadow";
       }
@@ -1368,23 +1695,42 @@
           lessonsListHtml = `
             <div class="mt-3 border-t border-slate-100 dark:border-slate-800 pt-2 space-y-1.5">
               <p class="text-[9px] font-bold text-slate-400">الدروس المتوفرة:</p>
-              ${unitLessons.map(ul => `
-                <button onclick="playLesson('${ul.id}')" class="w-full text-right py-1 px-2 text-[10px] text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 rounded flex items-center justify-between group font-semibold">
-                  <span class="flex items-center gap-1">
-                    <i data-lucide="play" class="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"></i>
-                    ${ul.title}
-                  </span>
-                  <span class="text-[8px] text-slate-400">${ul.audioDuration}</span>
-                </button>
-              `).join('')}
+              ${unitLessons.map(ul => {
+                const prog = getLessonProgressInfo(ul.id);
+                const isLocked = isLessonLocked(ul.id);
+                const isCompleted = completedLessons[ul.id];
+                
+                if (isLocked) {
+                  return `
+                    <button onclick="showToast('الدرس مغلق', 'يجب عليك إنهاء الدروس السابقة أولاً لتتمكن من فتح هذا الدرس.', 'error')" class="w-full text-right py-1 px-2 text-[10px] text-slate-400 bg-slate-50/50 dark:bg-slate-900/10 hover:bg-slate-100 border border-slate-200/40 rounded flex items-center justify-between group font-semibold cursor-not-allowed opacity-60">
+                      <span class="flex items-center gap-1">
+                        <i data-lucide="lock" class="h-3 w-3 shrink-0"></i>
+                        الدرس ${prog.index}: ${ul.title}
+                      </span>
+                      <span class="text-[8px] text-slate-400">${ul.audioDuration}</span>
+                    </button>
+                  `;
+                }
+
+                return `
+                  <button onclick="playLesson('${ul.id}')" class="w-full text-right py-1 px-2 text-[10px] ${isCompleted ? 'text-emerald-800 bg-emerald-500/5 hover:bg-emerald-500/10' : 'text-emerald-700 dark:text-emerald-450 hover:bg-emerald-500/10'} rounded flex items-center justify-between group font-semibold">
+                    <span class="flex items-center gap-1">
+                      <i data-lucide="play" class="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"></i>
+                      الدرس ${prog.index}: ${ul.title} ${isCompleted ? '✅' : ''}
+                    </span>
+                    <span class="text-[8px] text-slate-400">${ul.audioDuration}</span>
+                  </button>
+                `;
+              }).join('')}
             </div>
           `;
         } else {
+          // If no lessons in this unit, show static curriculum preview topics
           lessonsListHtml = `
             <ul class="space-y-2 mt-2">
               ${unit.topics.map(topic => `
                 <li class="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 font-arabic">
-                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                  <span class="h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
                   <span>${topic}</span>
                 </li>
               `).join('')}
@@ -1393,8 +1739,8 @@
         }
 
         return `
-          <div class="border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/40 p-5 space-y-2">
-            <h4 class="font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800/80 pb-2 flex justify-between items-center text-xs">
+          <div id="unit-card-${idx + 1}" class="border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/40 p-5 space-y-2 transition-all duration-350">
+            <h4 onclick="pushNavigationState({ page: 'unit', trackId: '${trackId}', unitId: ${idx + 1} })" class="font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800/80 pb-2 flex justify-between items-center text-xs cursor-pointer hover:text-emerald-700 transition-colors">
               <span>${unit.module}</span>
               <i data-lucide="chevron-down" class="h-4 w-4 text-slate-400"></i>
             </h4>
@@ -1410,7 +1756,7 @@
             <div>
               <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400 px-3 py-1 rounded-full">${track.subtitle}</span>
               <h3 class="text-2xl font-black text-slate-900 dark:text-white mt-3">${track.title}</h3>
-              <p class="text-[10px] text-slate-500 dark:text-slate-450 mt-1.5">المدة المقترحة: ${track.duration} | المقررات: ${track.lessonsCount} درساً</p>
+              <p class="text-[10px] text-slate-500 dark:text-slate-455 mt-1.5">المدة المقترحة: ${track.duration} | المقررات: ${track.lessonsCount} درساً</p>
             </div>
             
             <p class="font-arabic text-sm leading-loose text-slate-655 dark:text-slate-300 whitespace-pre-line">${track.description}</p>
@@ -1445,6 +1791,48 @@
     // ==========================================
     // PAGE 3: LESSONS & INTERACTIVE LESSON PLAYER LOGIC
     // ==========================================
+    function showToast(title, message, type = 'info') {
+      let container = document.getElementById('toast-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'fixed bottom-5 left-5 z-[9999] flex flex-col gap-2 max-w-sm w-full px-4';
+        document.body.appendChild(container);
+      }
+
+      const toast = document.createElement('div');
+      const borderCol = type === 'error' ? 'border-red-500 bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-400' : 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-400';
+      const icon = type === 'error' ? 'lock' : 'check';
+      
+      toast.className = `p-4 rounded-xl border shadow-lg flex items-start gap-3 transition-all duration-500 translate-y-10 opacity-0 ${borderCol}`;
+      toast.innerHTML = `
+        <i data-lucide="${icon}" class="h-5 w-5 shrink-0 mt-0.5"></i>
+        <div class="flex-1 font-arabic text-right">
+          <p class="text-xs font-bold">${title}</p>
+          <p class="text-[10px] opacity-90 mt-1 leading-relaxed">${message}</p>
+        </div>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0">
+          <i data-lucide="x" class="h-3.5 w-3.5"></i>
+        </button>
+      `;
+
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      // Trigger animation
+      setTimeout(() => {
+        toast.classList.remove('translate-y-10', 'opacity-0');
+      }, 50);
+
+      // Auto remove
+      setTimeout(() => {
+        toast.classList.add('translate-y-10', 'opacity-0');
+        setTimeout(() => {
+          toast.remove();
+        }, 500);
+      }, 4000);
+    }
+
     function loadLessons() {
       // Toggle back container visibility
       document.getElementById('lessons-list-container').classList.remove('hidden');
@@ -1471,7 +1859,7 @@
       if (filtered.length === 0) {
         grid.innerHTML = `
           <div class="col-span-full py-16 text-center text-slate-400 space-y-2">
-            <i data-lucide="info" class="h-10 w-10 mx-auto text-slate-650"></i>
+            <i data-lucide="info" class="h-10 w-10 mx-auto text-slate-655"></i>
             <p class="text-xs font-bold">لم نعثر على دروس تطابق الفلاتر المحددة</p>
           </div>
         `;
@@ -1482,18 +1870,43 @@
       grid.innerHTML = filtered.map(lesson => {
         const isDone = completedLessons[lesson.id];
         const score = quizScores[lesson.id];
+        const prog = getLessonProgressInfo(lesson.id);
+        const isLocked = isLessonLocked(lesson.id);
+
+        if (isLocked) {
+          return `
+            <div class="group relative rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/10 p-5 flex flex-col justify-between shadow-sm opacity-60">
+              <div>
+                <div class="flex justify-between items-start mb-3">
+                  <span class="bg-slate-100 text-slate-550 text-[9px] font-bold px-2.5 py-0.5 rounded">${lesson.unitTitle}</span>
+                  <span class="text-[9px] text-slate-400 font-bold">الدرس ${prog.index} من ${prog.total}</span>
+                </div>
+                <h3 class="text-xs font-bold text-slate-555 dark:text-slate-400 line-clamp-2 min-h-[32px] flex items-center gap-1.5">
+                  <i data-lucide="lock" class="h-3.5 w-3.5 text-slate-400 shrink-0"></i>
+                  ${lesson.title}
+                </h3>
+                <p class="text-[10px] text-slate-400 dark:text-slate-555 mt-2 line-clamp-3 leading-relaxed font-arabic">هذا الدرس مغلق. يجب عليك إنهاء الدروس السابقة أولاً لتتمكن من فتحه.</p>
+              </div>
+              
+              <div class="mt-6 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400 font-semibold">
+                <span class="flex items-center gap-1">
+                  <i data-lucide="clock" class="h-3.5 w-3.5"></i>
+                  ${lesson.audioDuration}
+                </span>
+                <button onclick="showToast('الدرس مغلق', 'يجب عليك إنهاء الدروس السابقة أولاً لتتمكن من فتح هذا الدرس.', 'error')" class="rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-500 py-1.5 px-3.5 font-bold text-[9px] flex items-center gap-1">
+                  مغلق 🔒
+                </button>
+              </div>
+            </div>
+          `;
+        }
 
         return `
           <div class="group relative rounded-2xl border ${isDone ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-200 bg-white'} dark:border-slate-800 dark:bg-slate-900/40 p-5 flex flex-col justify-between shadow-sm hover:shadow-lg transition-all duration-300">
             <div>
               <div class="flex justify-between items-start mb-3">
                 <span class="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[9px] font-bold px-2.5 py-0.5 rounded">${lesson.unitTitle}</span>
-                ${isDone ? `
-                  <span class="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold">
-                    <i data-lucide="check" class="h-3 w-3"></i>
-                    مكتمل ${score !== undefined ? `(${score}%)` : ''}
-                  </span>
-                ` : ''}
+                <span class="text-[9px] text-slate-400 font-bold">الدرس ${prog.index} من ${prog.total}</span>
               </div>
               <h3 class="text-xs font-bold text-slate-900 dark:text-white line-clamp-2 min-h-[32px]">${lesson.title}</h3>
               <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-2 line-clamp-3 leading-relaxed font-arabic">${lesson.simplifiedExplanation.substring(0, 120)}...</p>
@@ -1504,10 +1917,18 @@
                 <i data-lucide="headphones" class="h-3.5 w-3.5"></i>
                 ${lesson.audioDuration}
               </span>
-              <button onclick="playLesson('${lesson.id}')" class="rounded-lg bg-emerald-700 hover:bg-emerald-800 py-1.5 px-3.5 text-white font-bold text-[9px] shadow transition-colors flex items-center gap-1">
-                تشغيل الدرس
-                <i data-lucide="play" class="h-3 w-3 fill-current"></i>
-              </button>
+              <div class="flex items-center gap-2">
+                ${isDone ? `
+                  <span class="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-450 text-[9px] font-bold">
+                    <i data-lucide="check" class="h-3 w-3"></i>
+                    مكتمل ${score !== undefined ? `(${score}%)` : ''}
+                  </span>
+                ` : ''}
+                <button onclick="playLesson('${lesson.id}')" class="rounded-lg bg-emerald-700 hover:bg-emerald-800 py-1.5 px-3.5 text-white font-bold text-[9px] shadow transition-colors flex items-center gap-1">
+                  تشغيل الدرس
+                  <i data-lucide="play" class="h-3 w-3 fill-current"></i>
+                </button>
+              </div>
             </div>
           </div>
         `;
@@ -1515,12 +1936,16 @@
       lucide.createIcons();
     }
 
-    // Interactive Player loader
-    function playLesson(lessonId) {
+    function playLesson(lessonId,
+ pushHistory = true) {
       const lesson = window.lessons.find(l => l.id === lessonId);
       if (!lesson) return;
 
       activeLessonId = lessonId;
+      if (pushHistory) {
+        pushNavigationState({ page: 'lesson', lessonId: lessonId });
+        return;
+      }
 
       // Log activity
       logActivity(`بدأ الطالب بدراسة درس "${lesson.title}"`);
@@ -1567,20 +1992,14 @@
       }
 
       // Reset explanations tab
-      switchExplanationTab('simplified');
+      switchExplanationTab('simplified', false);
 
       // Scroll player to top
       document.getElementById('lesson-player-container').scrollIntoView({ behavior: 'smooth' });
     }
 
     function closeLessonPlayer() {
-      // Clean player sync timers
-      stopAudioPlayer();
-      
-      document.getElementById('lessons-list-container').classList.remove('hidden');
-      document.getElementById('lesson-player-container').classList.add('hidden');
-      
-      filterLessons();
+      goBack();
     }
 
     // Media toggle inside Player
@@ -1650,7 +2069,12 @@
     }
 
     // Explanation tabs loader
-    function switchExplanationTab(tab) {
+    function switchExplanationTab(tab, pushHistory = true) {
+      if (pushHistory) {
+        pushNavigationState({ page: 'topic', lessonId: activeLessonId, topicId: tab });
+        return;
+      }
+
       playerActiveTab = tab;
       
       document.querySelectorAll('.exp-tab-btn').forEach(btn => {
@@ -1862,6 +2286,11 @@
 
       logActivity(`أكمل الطالب اختبار درس "${lesson.title}" بنسبة إنجاز ${pct}%`);
 
+      // Find next sequential lesson in the track
+      const trackLessons = window.lessons.filter(l => l.trackId === lesson.trackId);
+      const currentIdx = trackLessons.findIndex(l => l.id === activeLessonId);
+      const nextLesson = trackLessons[currentIdx + 1];
+
       viewport.innerHTML = `
         <div class="text-center py-6 space-y-4">
           <div class="relative inline-flex items-center justify-center">
@@ -1880,10 +2309,18 @@
             </p>
           </div>
 
-          <button onclick="switchExplanationTab('quiz')" class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 text-[10px] shadow">
-            <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
-            إعادة الاختبار
-          </button>
+          <div class="flex justify-center gap-3">
+            <button onclick="switchExplanationTab('quiz')" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-350 hover:bg-slate-55 dark:hover:bg-slate-850 font-bold px-4 py-2 text-[10px] shadow">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i>
+              إعادة الاختبار
+            </button>
+            ${nextLesson ? `
+              <button onclick="playLesson('${nextLesson.id}')" class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 text-[10px] shadow">
+                الدرس التالي
+                <i data-lucide="arrow-left" class="h-3.5 w-3.5"></i>
+              </button>
+            ` : ''}
+          </div>
         </div>
       `;
       lucide.createIcons();
